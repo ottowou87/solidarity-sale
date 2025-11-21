@@ -25,17 +25,15 @@ export default function SLDPrivateSalePage() {
   const [showModal, setShowModal] = useState(false);
   const [txHash, setTxHash] = useState(null);
 
-  // 👉 Replace with your deployed sale contract address
+  // Sale contract address
   const saleAddress = "0xfda1788ba053632AB9b757098839ce45c330175F";
 
-  // Token symbol
   const tokenSymbol = "SLD";
 
-  // Sale timing (customize these)
+  // Sale timing
   const SALE_START = new Date("2025-11-17T00:00:00Z").getTime();
   const SALE_END = new Date("2025-12-31T00:00:00Z").getTime();
 
-  // Min / max buy in BNB
   const MIN_BNB = 0.01;
   const MAX_BNB = 3;
 
@@ -66,14 +64,14 @@ export default function SLDPrivateSalePage() {
       const sale = new ethers.Contract(saleAddress, saleAbi, provider);
       const _rate = await sale.rate();
       const _saleActive = await sale.saleActive();
-      setRate(Number(_rate));
+      setRate(Number(_rate)); // Store raw wei rate
       setSaleActive(_saleActive);
     } catch (err) {
       console.error(err);
     }
   }
 
-  // Fetch live BNB price in USD
+  // Fetch BNB price in USD
   useEffect(() => {
     async function fetchPrice() {
       try {
@@ -108,30 +106,17 @@ export default function SLDPrivateSalePage() {
       }
 
       if (!target) {
-        setCountdown({
-          label,
-          days: 0,
-          hours: 0,
-          minutes: 0,
-          seconds: 0,
-        });
+        setCountdown({ label, days: 0, hours: 0, minutes: 0, seconds: 0 });
         return;
       }
 
       const diff = target - now;
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor(
-        (diff / (1000 * 60 * 60)) % 24
-      );
-      const minutes = Math.floor((diff / (1000 * 60)) % 60);
-      const seconds = Math.floor((diff / 1000) % 60);
-
       setCountdown({
         label,
-        days,
-        hours,
-        minutes,
-        seconds,
+        days: Math.floor(diff / 86400000),
+        hours: Math.floor((diff / 3600000) % 24),
+        minutes: Math.floor((diff / 60000) % 60),
+        seconds: Math.floor((diff / 1000) % 60),
       });
     }
 
@@ -172,23 +157,19 @@ export default function SLDPrivateSalePage() {
     }
   }
 
-  // Update previews when BNB input changes
+  // Update token preview
   function updateTokenPreview(amount) {
     setBnbAmount(amount);
     const numeric = Number(amount);
 
-    // Reset if invalid
     if (!amount || isNaN(numeric) || numeric <= 0) {
       setTokenPreview(0);
       setUsdPreview(0);
       setSldUsdValue(0);
       setInputError("");
-      setGasEstimateBNB(null);
-      setGasEstimateUSD(null);
       return;
     }
 
-    // Min / max checks
     if (numeric < MIN_BNB) {
       setInputError(`Minimum purchase is ${MIN_BNB} BNB`);
     } else if (numeric > MAX_BNB) {
@@ -197,27 +178,24 @@ export default function SLDPrivateSalePage() {
       setInputError("");
     }
 
-    // Token preview
     if (rate) {
-      const estimatedTokens = numeric * rate;
+      const humanRate = rate / 1e18;   // ✅ FIX: convert wei → readable
+      const estimatedTokens = numeric * humanRate;
       setTokenPreview(estimatedTokens);
     }
 
-    // USD preview (BNB spent)
     if (bnbPriceUSD) {
       const estimatedUSD = numeric * bnbPriceUSD;
       setUsdPreview(estimatedUSD);
 
-      // SLD USD value based on private-sale rate:
-      // 1 BNB = rate SLD, 1 BNB = bnbPriceUSD USD → 1 SLD = bnbPriceUSD / rate
       if (rate) {
-        const sldPriceUSD = bnbPriceUSD / rate;
-        const sldValueUSD = (numeric * rate) * sldPriceUSD;
+        const humanRate = rate / 1e18;
+        const sldPriceUSD = bnbPriceUSD / humanRate;
+        const sldValueUSD = (numeric * humanRate) * sldPriceUSD;
         setSldUsdValue(sldValueUSD);
       }
     }
 
-    // Gas estimation (fire and forget)
     estimateGas(numeric);
   }
 
@@ -254,7 +232,6 @@ export default function SLDPrivateSalePage() {
     }
   }
 
-  // Fetch contract info when wallet connects
   useEffect(() => {
     if (account) fetchSaleInfo();
   }, [account]);
@@ -262,10 +239,11 @@ export default function SLDPrivateSalePage() {
   // UI
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white flex flex-col items-center justify-center p-6 relative">
+
       {/* Success Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-amber-500/50 rounded-3xl p-6 max-w-sm w-full shadow-2xl transform animate-[scaleIn_0.25s_ease-out]">
+          <div className="bg-gray-900 border border-amber-500/50 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-lg font-semibold text-amber-400">Purchase Successful</h2>
               <button onClick={() => setShowModal(false)}>
@@ -274,9 +252,7 @@ export default function SLDPrivateSalePage() {
             </div>
             <div className="flex flex-col items-center text-center">
               <CheckCircle2 className="w-14 h-14 text-emerald-400 mb-3 animate-pulse" />
-              <p className="mb-2">
-                Your <span className="font-semibold">{tokenSymbol}</span> tokens have been sent to your wallet.
-              </p>
+              <p className="mb-2">Your {tokenSymbol} tokens have been sent to your wallet.</p>
               {txHash && (
                 <a
                   href={`https://bscscan.com/tx/${txHash}`}
@@ -310,8 +286,7 @@ export default function SLDPrivateSalePage() {
 
       <h1 className="text-4xl font-bold mb-4 text-amber-400">Solidarity (SLD) Private Sale</h1>
       <p className="text-gray-300 mb-6 text-center max-w-xl">
-        Buy Solidarity ({tokenSymbol}) tokens securely using BNB. Tokens are automatically delivered to your wallet
-        after confirmation on Binance Smart Chain.
+        Buy Solidarity ({tokenSymbol}) tokens securely using BNB. Tokens are automatically delivered after confirmation.
       </p>
 
       {!account ? (
@@ -342,7 +317,16 @@ export default function SLDPrivateSalePage() {
             <p className="text-sm text-gray-400 mb-1">
               Current Rate:{" "}
               <span className="text-amber-400 font-semibold">
-                {rate.toLocaleString()} {tokenSymbol} / BNB
+                {(rate / 1e18).toLocaleString()} {tokenSymbol} / BNB
+              </span>
+            </p>
+          )}
+
+          {tokenPreview > 0 && (
+            <p className="text-green-400 text-sm mb-2">
+              You will receive ~{" "}
+              <span className="font-semibold">
+                {tokenPreview.toLocaleString()} {tokenSymbol}
               </span>
             </p>
           )}
@@ -351,58 +335,6 @@ export default function SLDPrivateSalePage() {
             <p className="text-xs text-gray-500 mb-3">
               Live BNB Price: ~${bnbPriceUSD.toFixed(2)} USD
             </p>
-          )}
-
-          {(tokenPreview > 0 || usdPreview > 0) && (
-            <div className="mb-4 text-sm">
-              {tokenPreview > 0 && (
-                <p className="text-green-400">
-                  You will receive approximately{" "}
-                  <span className="font-semibold">
-                    {tokenPreview.toLocaleString()} {tokenSymbol}
-                  </span>
-                </p>
-              )}
-              {usdPreview > 0 && (
-                <p className="text-blue-400">
-                  You are spending about{" "}
-                  <span className="font-semibold">
-                    ${usdPreview.toFixed(2)} USD
-                  </span>
-                  .
-                </p>
-              )}
-              {sldUsdValue > 0 && (
-                <p className="text-amber-300">
-                  Estimated {tokenSymbol} value:{" "}
-                  <span className="font-semibold">
-                    ${sldUsdValue.toFixed(2)} USD
-                  </span>{" "}
-                  (based on sale rate).
-                </p>
-              )}
-            </div>
-          )}
-
-          {gasEstimateBNB && (
-            <div className="mb-4 text-xs text-gray-400">
-              <p>
-                Estimated Gas Fee:{" "}
-                <span className="text-gray-200">
-                  {gasEstimateBNB.toFixed(6)} BNB
-                </span>
-                {gasEstimateUSD && (
-                  <>
-                    {" "}
-                    (~
-                    <span className="text-gray-200">
-                      ${gasEstimateUSD.toFixed(2)} USD
-                    </span>
-                    )
-                  </>
-                )}
-              </p>
-            </div>
           )}
 
           <button
@@ -429,28 +361,13 @@ export default function SLDPrivateSalePage() {
       </div>
 
       <div className="mt-8 flex gap-6 text-gray-500">
-        <a
-          href="https://solidaritytoken.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-amber-400 flex items-center gap-2"
-        >
+        <a href="https://solidaritytoken.io" className="hover:text-amber-400 flex items-center gap-2">
           <Globe size={18} /> Website
         </a>
-        <a
-          href="https://t.me/solidaritytoken"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-amber-400 flex items-center gap-2"
-        >
+        <a href="https://t.me/solidaritytoken" className="hover:text-amber-400 flex items-center gap-2">
           <Send size={18} /> Telegram
         </a>
-        <a
-          href="https://twitter.com/solidaritytoken"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-amber-400 flex items-center gap-2"
-        >
+        <a href="https://twitter.com/solidaritytoken" className="hover:text-amber-400 flex items-center gap-2">
           <Twitter size={18} /> Twitter
         </a>
       </div>
