@@ -26,14 +26,14 @@ export default function SLDPrivateSalePage() {
   const [txHash, setTxHash] = useState(null);
 
   // 👉 Replace with your deployed sale contract address
-  const saleAddress = "0x79028458936d4788E1fF43E94D357885B34F93cC";
+  const saleAddress = "0xfda1788ba053632AB9b757098839ce45c330175F";
 
   // Token symbol
   const tokenSymbol = "SLD";
 
   // Sale timing (customize these)
   const SALE_START = new Date("2025-11-17T00:00:00Z").getTime();
-  const SALE_END = new Date("2025-12-25T00:00:00Z").getTime();
+  const SALE_END = new Date("2025-12-31T00:00:00Z").getTime();
 
   // Min / max buy in BNB
   const MIN_BNB = 0.01;
