@@ -191,10 +191,12 @@ export default function SLDPrivateSalePage() {
       setIsMobile(/Mobi|Android|iPhone|iPad/i.test(ua));
 
       if (window.ethereum) {
-        // Trust Wallet detection
+        // Trust Wallet detection (best-effort)
         setIsTrustWallet(
           !!window.ethereum.isTrustWallet ||
-            (window.ethereum.isMetaMask && window.ethereum.isTrust && !window.ethereum.isBraveWallet)
+            (window.ethereum.isMetaMask &&
+              window.ethereum.isTrust &&
+              !window.ethereum.isBraveWallet)
         );
 
         window.ethereum
@@ -243,7 +245,6 @@ export default function SLDPrivateSalePage() {
         params: [{ chainId: "0x38" }], // 56
       });
     } catch (err) {
-      // If chain not added, you could call wallet_addEthereumChain here
       console.error("Network switch failed:", err);
       alert(
         "Please manually switch your wallet network to BNB Smart Chain (chainId 56)."
@@ -284,9 +285,7 @@ export default function SLDPrivateSalePage() {
 
       if (account) {
         const walletSld = await token.balanceOf(account);
-        setWalletSldBalance(
-          Number(walletSld) / 10 ** tokenDecimals
-        );
+        setWalletSldBalance(Number(walletSld) / 10 ** tokenDecimals);
       }
 
       const saleSld = await token.balanceOf(saleAddress);
@@ -369,10 +368,7 @@ export default function SLDPrivateSalePage() {
   // Max BNB (90% of wallet, capped by max)
   function setMaxBnb() {
     if (!walletBnbBalance) return;
-    const usable = Math.max(
-      0,
-      Math.min(walletBnbBalance * 0.9, MAX_BNB)
-    );
+    const usable = Math.max(0, Math.min(walletBnbBalance * 0.9, MAX_BNB));
     const rounded = usable.toFixed(4);
     updateTokenPreview(rounded);
   }
@@ -503,7 +499,8 @@ export default function SLDPrivateSalePage() {
           </p>
           {referrer && (
             <p className="text-xs text-emerald-400 mt-1">
-              Referred by: <span className="font-mono">{shortAddress(referrer)}</span>
+              Referred by:{" "}
+              <span className="font-mono">{shortAddress(referrer)}</span>
             </p>
           )}
         </div>
