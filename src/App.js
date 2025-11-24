@@ -10,20 +10,22 @@ const SALE_WALLET_ADDRESS = "0x37a8ccf24b8681dddaa1d2e1ad0aa7f7c3e0ee05";
 // BSC Mainnet chain id
 const BSC_CHAIN_ID = "0x38"; // 56 in hex
 
-// Presale caps (you can adjust)
+// Presale caps
 const SOFT_CAP_BNB = 50;
 const HARD_CAP_BNB = 200;
 
-// TODO: update this when you know how much you’ve raised
-const CURRENT_RAISED_BNB = 0; // manual for now
+// Optional: BscScan API key for auto-tracking raised BNB
+// Get one free at https://bscscan.com/myapikey
+const BSCSCAN_API_KEY = ""; // <-- put your key here (or leave empty to disable)
+const BSCSCAN_ADDRESS = SALE_WALLET_ADDRESS;
 
-// Presale end time (change this to your real end date/time)
+// Presale end time (adjust to your real end date/time, in UTC)
 const PRESALE_END_TIME = new Date("2025-12-31T23:59:59Z").getTime();
 
-// Social links (replace with your real links)
+// Social links
 const WEBSITE_URL = "https://solidarity-sale.vercel.app";
-const TELEGRAM_URL = "#"; // e.g. "https://t.me/yourgroup"
-const TWITTER_URL = "#"; // e.g. "https://x.com/yourhandle";
+const TELEGRAM_URL = "https://t.me/solidaritytoken";
+const TWITTER_URL = "https://x.com/bens1382590";
 
 function formatTimeLeft(msDiff) {
   if (msDiff <= 0) return "Presale ended";
@@ -43,9 +45,13 @@ function App() {
   const [sldAmount, setSldAmount] = useState("0");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+
   const [timeLeft, setTimeLeft] = useState(
     formatTimeLeft(PRESALE_END_TIME - Date.now())
   );
+
+  const [raisedBNB, setRaisedBNB] = useState(0);
+  const [raisedLoading, setRaisedLoading] = useState(false);
 
   // calculate SLD when BNB changes
   useEffect(() => {
@@ -66,10 +72,37 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // presale progress percentage
+  // auto-fetch raised BNB from BscScan (optional)
+  useEffect(() => {
+    const fetchRaised = async () => {
+      if (!BSCSCAN_API_KEY) return; // disabled until key is set
+
+      try {
+        setRaisedLoading(true);
+        const url = `https://api.bscscan.com/api?module=account&action=balance&address=${BSCSCAN_ADDRESS}&tag=latest&apikey=${BSCSCAN_API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status === "1") {
+          const wei = data.result;
+          const bnb = Number(ethers.formatEther(wei));
+          setRaisedBNB(bnb);
+        }
+      } catch (err) {
+        console.error("Error fetching raised amount:", err);
+      } finally {
+        setRaisedLoading(false);
+      }
+    };
+
+    fetchRaised();
+    // refresh every 60 seconds
+    const interval = setInterval(fetchRaised, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   const progressPercent = Math.max(
     0,
-    Math.min(100, (CURRENT_RAISED_BNB / HARD_CAP_BNB) * 100)
+    Math.min(100, (raisedBNB / HARD_CAP_BNB) * 100)
   );
 
   const connectWallet = async () => {
@@ -197,6 +230,37 @@ function App() {
     }
   };
 
+  const handleAddTokenToWallet = async () => {
+    if (!window.ethereum) {
+      setStatus("Wallet not detected. Please install MetaMask.");
+      return;
+    }
+
+    try {
+      const wasAdded = await window.ethereum.request({
+        method: "wallet_watchAsset",
+        params: {
+          type: "ERC20",
+          options: {
+            address: "0xb10c8C889a23C4835Ea4F5962666b0B8da891B1A", // SLD contract
+            symbol: TOKEN_SYMBOL,
+            decimals: 18,
+            image: `${window.location.origin}/sld-logo-512.png`, // put logo in /public
+          },
+        },
+      });
+
+      if (wasAdded) {
+        setStatus("SLD has been added to your wallet ✔");
+      } else {
+        setStatus("Token was not added to wallet.");
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not add token to wallet.");
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -262,6 +326,14 @@ function App() {
             {loading ? "Processing…" : "Buy SLD"}
           </button>
 
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={handleAddTokenToWallet}
+          >
+            Add SLD to MetaMask
+          </button>
+
           <p className="note">
             Tokens are distributed manually after the presale ends, according to
             the official vesting schedule.
@@ -292,8 +364,11 @@ function App() {
           <div className="progress-section">
             <h3>Presale Progress</h3>
             <p>
-              Raised: <strong>{CURRENT_RAISED_BNB} BNB</strong> /{" "}
-              <strong>{SOFT_CAP_BNB} BNB soft cap</strong> /{" "}
+              Raised:{" "}
+              <strong>
+                {raisedLoading ? "…" : `${raisedBNB.toFixed(4)} BNB`}
+              </strong>{" "}
+              / <strong>{SOFT_CAP_BNB} BNB soft cap</strong> /{" "}
               <strong>{HARD_CAP_BNB} BNB hard cap</strong>
             </p>
             <div className="progress-bar">
@@ -302,10 +377,25 @@ function App() {
                 style={{ width: `${progressPercent}%` }}
               ></div>
             </div>
+            {!BSCSCAN_API_KEY && (
+              <p className="note">
+                * To auto-update this value, set BSCSCAN_API_KEY in App.js.
+                Otherwise, you can edit raisedBNB manually.
+              </p>
+            )}
+          </div>
+
+          <div className="qr-section">
+            <h3>Scan to Open Presale</h3>
             <p className="note">
-              * Update CURRENT_RAISED_BNB in the code when you want to reflect
-              actual funds raised.
+              Scan this QR code with your phone camera or wallet app to open
+              this presale page.
             </p>
+            <img
+              src="/sld-presale-qr.png"
+              alt="SLD presale QR"
+              className="qr-image"
+            />
           </div>
         </section>
 
