@@ -1,23 +1,28 @@
 import React, { useState, useEffect } from "react";
 import { ethers } from "ethers";
 
-const PRESALE_RATE = 23000000; // 1 BNB = 23,000,000 SLD
+const DEFAULT_PRESALE_RATE = 23000000; // display only (1 BNB ≈ 23,000,000 SLD)
 const TOKEN_SYMBOL = "SLD";
 
-// Wallet that will receive BNB from investors
-const SALE_WALLET_ADDRESS = "0x37a8ccf24b8681dddaa1d2e1ad0aa7f7c3e0ee05";
+// Contracts
+const PRESALE_CONTRACT_ADDRESS = "0xfda1788ba053632AB9b757098839ce45c330175F";
+const TOKEN_CONTRACT_ADDRESS = "0xb10c8C889a23C4835Ea4F5962666b0B8da891B1A";
 
 // BSC Mainnet chain id
 const BSC_CHAIN_ID = "0x38"; // 56 in hex
 
 // Presale caps
 const SOFT_CAP_BNB = 50;
-const HARD_CAP_BNB = 200;
+const HARD_CAP_BNB = 2173;
 
-// Optional: BscScan API key for auto-tracking raised BNB
-// Get one free at https://bscscan.com/myapikey
-const BSCSCAN_API_KEY = ""; // <-- put your key here (or leave empty to disable)
-const BSCSCAN_ADDRESS = SALE_WALLET_ADDRESS;
+// BSC public RPC (read-only)
+const BSC_RPC = "https://bsc-dataseed.binance.org/";
+
+// Minimal ABI for your presale contract
+const PRESALE_ABI = [
+  "function buyTokens() external payable",
+  "function saleActive() external view returns (bool)"
+];
 
 // Presale end time (adjust to your real end date/time, in UTC)
 const PRESALE_END_TIME = new Date("2025-12-31T23:59:59Z").getTime();
@@ -32,6 +37,8 @@ const WHITELIST_ENABLED = false; // set true to enable
 const WHITELIST = [
   // "0xYourWhitelistedAddressHere".toLowerCase(),
 ];
+
+const rpcProvider = new ethers.JsonRpcProvider(BSC_RPC);
 
 function formatTimeLeft(msDiff) {
   if (msDiff <= 0) return "Presale ended";
@@ -58,6 +65,7 @@ function App() {
 
   const [raisedBNB, setRaisedBNB] = useState(0);
   const [raisedLoading, setRaisedLoading] = useState(false);
+  const [saleActive, setSaleActive] = useState(false);
 
   // theme + language
   const [theme, setTheme] = useState("dark"); // "dark" | "light"
@@ -73,13 +81,13 @@ function App() {
   const averageContribution =
     investorCount > 0 ? totalContributed / investorCount : 0;
 
-  // calculate SLD when BNB changes
+  // calculate SLD when BNB changes (display only)
   useEffect(() => {
     if (!bnbAmount || isNaN(Number(bnbAmount))) {
       setSldAmount("0");
       return;
     }
-    const sld = Number(bnbAmount) * PRESALE_RATE;
+    const sld = Number(bnbAmount) * DEFAULT_PRESALE_RATE;
     setSldAmount(sld.toLocaleString("en-US"));
   }, [bnbAmount]);
 
@@ -118,31 +126,34 @@ function App() {
     }
   }, []);
 
-  // auto-fetch raised BNB from BscScan (optional)
+  // Fetch raised BNB + saleActive from contract (on-chain)
   useEffect(() => {
-    const fetchRaised = async () => {
-      if (!BSCSCAN_API_KEY) return; // disabled until key is set
-
+    const fetchOnChainData = async () => {
       try {
         setRaisedLoading(true);
-        const url = `https://api.bscscan.com/api?module=account&action=balance&address=${BSCSCAN_ADDRESS}&tag=latest&apikey=${BSCSCAN_API_KEY}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data.status === "1") {
-          const wei = data.result;
-          const bnb = Number(ethers.formatEther(wei));
-          setRaisedBNB(bnb);
-        }
+        const contract = new ethers.Contract(
+          PRESALE_CONTRACT_ADDRESS,
+          PRESALE_ABI,
+          rpcProvider
+        );
+
+        const active = await contract.saleActive();
+        setSaleActive(active);
+
+        const balanceWei = await rpcProvider.getBalance(
+          PRESALE_CONTRACT_ADDRESS
+        );
+        const bnb = Number(ethers.formatEther(balanceWei));
+        setRaisedBNB(bnb);
       } catch (err) {
-        console.error("Error fetching raised amount:", err);
+        console.error("Error fetching presale data:", err);
       } finally {
         setRaisedLoading(false);
       }
     };
 
-    fetchRaised();
-    // refresh every 60 seconds
-    const interval = setInterval(fetchRaised, 60000);
+    fetchOnChainData();
+    const interval = setInterval(fetchOnChainData, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -239,6 +250,10 @@ function App() {
         setStatus("Please switch your wallet to BNB Smart Chain (BSC).");
         return;
       }
+      if (!saleActive) {
+        setStatus("Presale is not active at the moment.");
+        return;
+      }
 
       // whitelist check (optional)
       if (WHITELIST_ENABLED) {
@@ -262,8 +277,13 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
-      const tx = await signer.sendTransaction({
-        to: SALE_WALLET_ADDRESS,
+      const presale = new ethers.Contract(
+        PRESALE_CONTRACT_ADDRESS,
+        PRESALE_ABI,
+        signer
+      );
+
+      const tx = await presale.buyTokens({
         value: ethers.parseEther(valueBNB.toString()),
       });
 
@@ -302,7 +322,7 @@ function App() {
       }
 
       setStatus(
-        `Success! TX hash: ${tx.hash}. You will receive your ${TOKEN_SYMBOL} after the team processes presale allocations according to the vesting schedule.`
+        `Success! TX hash: ${tx.hash}. SLD is delivered instantly by the smart contract.`
       );
       setBnbAmount("");
     } catch (err) {
@@ -329,10 +349,10 @@ function App() {
         params: {
           type: "ERC20",
           options: {
-            address: "0xb10c8C889a23C4835Ea4F5962666b0B8da891B1A", // SLD contract
+            address: TOKEN_CONTRACT_ADDRESS,
             symbol: TOKEN_SYMBOL,
             decimals: 18,
-            image: `${window.location.origin}/sld-logo-512.png`, // put logo in /public
+            image: `${window.location.origin}/sld-logo-512.png`,
           },
         },
       });
@@ -431,13 +451,20 @@ function App() {
         <section className="card">
           <h2>{isFrench ? "Participer à la prévente" : "Participate in Presale"}</h2>
           <p className="rate">
-            1 BNB = <strong>{PRESALE_RATE.toLocaleString()} SLD</strong>
+            1 BNB ≈ <strong>{DEFAULT_PRESALE_RATE.toLocaleString()} SLD</strong>
           </p>
           <p className="timer">
             ⏳{" "}
             {isFrench ? "Temps restant :" : "Presale time left:"}{" "}
             <strong>{timeLeft}</strong>
           </p>
+          {!saleActive && (
+            <p className="note">
+              {isFrench
+                ? "La prévente n'est pas encore active. Veuillez revenir plus tard."
+                : "Presale is not currently active. Please check back later."}
+            </p>
+          )}
 
           <div className="field-group">
             <label>{isFrench ? "Montant en BNB" : "Amount in BNB"}</label>
@@ -484,8 +511,8 @@ function App() {
 
           <p className="note">
             {isFrench
-              ? "Les jetons seront distribués manuellement après la fin de la prévente, selon le calendrier de vesting officiel."
-              : "Tokens are distributed manually after the presale ends, according to the official vesting schedule."}
+              ? "Les jetons SLD sont envoyés automatiquement par le smart contract dès que votre transaction est confirmée. Aucun vesting pour les acheteurs."
+              : "SLD tokens are delivered instantly by the smart contract as soon as your transaction is confirmed. No vesting for buyers."}
           </p>
 
           <p className="note">
@@ -512,40 +539,42 @@ function App() {
             </li>
             <li>
               {isFrench
-                ? "Taux de prévente : 1 BNB = 23 000 000 SLD"
-                : "Presale rate: 1 BNB = 23,000,000 SLD"}
+                ? "Taux cible : 1 BNB ≈ 23 000 000 SLD"
+                : "Target rate: 1 BNB ≈ 23,000,000 SLD"}
             </li>
             <li>
-              {isFrench ? "Contrat :" : "Contract:"}{" "}
-              <span className="mono">
-                0xb10c8C889a23C4835Ea4F5962666b0B8da891B1A
-              </span>
-            </li>
-            <li>
-              {isFrench
-                ? "Allocation de prévente : 20% de l'offre totale"
-                : "Presale allocation: 20% of total supply"}
+              {isFrench ? "Contrat SLD :" : "SLD contract:"}{" "}
+              <span className="mono">{TOKEN_CONTRACT_ADDRESS}</span>
             </li>
             <li>
               {isFrench
-                ? "Liquidité verrouillée pour 6 mois"
-                : "Liquidity locked for 6 months"}
+                ? "Contrat de prévente :"
+                : "Presale contract:"}{" "}
+              <span className="mono">{PRESALE_CONTRACT_ADDRESS}</span>
             </li>
             <li>
               {isFrench
-                ? "10% débloqués au TGE, reste vesté sur 6 mois"
-                : "10% unlocked at TGE, remaining vested over 6 months"}
+                ? "Hardcap : 2 173 BNB • Softcap : 50 BNB"
+                : "Hardcap: 2,173 BNB • Soft cap: 50 BNB"}
+            </li>
+            <li>
+              {isFrench
+                ? "Pool de prévente chargé : 50 000 000 000 SLD (≈ 49 979 000 000 SLD nécessaires pour hardcap)."
+                : "Presale pool loaded: 50,000,000,000 SLD (≈ 49,979,000,000 SLD required to reach hardcap)."}
+            </li>
+            <li>
+              {isFrench
+                ? "Aucun vesting pour les acheteurs : 100% des SLD reçus immédiatement après l'achat."
+                : "No vesting for buyers: 100% of SLD is received immediately after purchase."}
             </li>
           </ul>
 
           <div className="progress-section">
             <h3>{isFrench ? "Progression de la prévente" : "Presale Progress"}</h3>
             <p>
-              {isFrench ? "Collecté :" : "Raised:"}{" "}
+              {isFrench ? "Collecté (on-chain) :" : "Raised (on-chain):"}{" "}
               <strong>
-                {raisedLoading
-                  ? "…"
-                  : `${raisedBNB.toFixed(4)} BNB`}
+                {raisedLoading ? "…" : `${raisedBNB.toFixed(4)} BNB`}
               </strong>{" "}
               / <strong>{SOFT_CAP_BNB} BNB soft cap</strong> /{" "}
               <strong>{HARD_CAP_BNB} BNB hard cap</strong>
@@ -556,13 +585,6 @@ function App() {
                 style={{ width: `${progressPercent}%` }}
               ></div>
             </div>
-            {!BSCSCAN_API_KEY && (
-              <p className="note">
-                {isFrench
-                  ? "* Pour mettre à jour automatiquement cette valeur, ajoutez BSCSCAN_API_KEY dans App.js."
-                  : "* To auto-update this value, set BSCSCAN_API_KEY in App.js."}
-              </p>
-            )}
           </div>
 
           <div className="qr-section">
@@ -646,12 +668,12 @@ function App() {
             <li>
               <strong>
                 {isFrench
-                  ? "Recevoir SLD :"
-                  : "Receive SLD:"}
+                  ? "Recevoir SLD immédiatement :"
+                  : "Receive SLD instantly:"}
               </strong>{" "}
               {isFrench
-                ? "Après la fin de la prévente, SLD sera distribué selon le calendrier de vesting."
-                : "After the presale ends, SLD will be distributed to your wallet according to the vesting schedule."}
+                ? "Dès que la transaction est confirmée, le smart contract envoie automatiquement vos SLD sur votre wallet."
+                : "As soon as the transaction confirms, the smart contract automatically sends your SLD to your wallet."}
             </li>
           </ol>
         </section>
