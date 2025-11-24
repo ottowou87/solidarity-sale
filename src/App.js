@@ -27,6 +27,12 @@ const WEBSITE_URL = "https://solidarity-sale.vercel.app";
 const TELEGRAM_URL = "https://t.me/solidaritytoken";
 const TWITTER_URL = "https://x.com/bens1382590";
 
+// Whitelist (simple, local)
+const WHITELIST_ENABLED = false; // set true to enable
+const WHITELIST = [
+  // "0xYourWhitelistedAddressHere".toLowerCase(),
+];
+
 function formatTimeLeft(msDiff) {
   if (msDiff <= 0) return "Presale ended";
   const totalSeconds = Math.floor(msDiff / 1000);
@@ -53,6 +59,20 @@ function App() {
   const [raisedBNB, setRaisedBNB] = useState(0);
   const [raisedLoading, setRaisedLoading] = useState(false);
 
+  // theme + language
+  const [theme, setTheme] = useState("dark"); // "dark" | "light"
+  const [lang, setLang] = useState("en"); // "en" | "fr"
+  const isFrench = lang === "fr";
+
+  // referral + analytics (local only)
+  const [referrer, setReferrer] = useState(null);
+  const [investorCount, setInvestorCount] = useState(0);
+  const [totalContributed, setTotalContributed] = useState(0);
+  const [referralStats, setReferralStats] = useState({}); // { refAddress: totalBNB }
+
+  const averageContribution =
+    investorCount > 0 ? totalContributed / investorCount : 0;
+
   // calculate SLD when BNB changes
   useEffect(() => {
     if (!bnbAmount || isNaN(Number(bnbAmount))) {
@@ -70,6 +90,32 @@ function App() {
       setTimeLeft(formatTimeLeft(PRESALE_END_TIME - now));
     }, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // referral + analytics load (from localStorage)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref");
+      if (ref) {
+        localStorage.setItem("sld_referrer", ref);
+        setReferrer(ref);
+      } else {
+        const stored = localStorage.getItem("sld_referrer");
+        if (stored) setReferrer(stored);
+      }
+
+      const storedAnalytics = localStorage.getItem("sld_analytics");
+      if (storedAnalytics) {
+        const parsed = JSON.parse(storedAnalytics);
+        if (parsed.investorCount) setInvestorCount(parsed.investorCount);
+        if (parsed.totalContributed)
+          setTotalContributed(parsed.totalContributed);
+        if (parsed.referralStats) setReferralStats(parsed.referralStats);
+      }
+    } catch (e) {
+      console.error("Error reading local analytics:", e);
+    }
   }, []);
 
   // auto-fetch raised BNB from BscScan (optional)
@@ -193,6 +239,17 @@ function App() {
         setStatus("Please switch your wallet to BNB Smart Chain (BSC).");
         return;
       }
+
+      // whitelist check (optional)
+      if (WHITELIST_ENABLED) {
+        const normalized = walletAddress.toLowerCase();
+        const allowed = WHITELIST.map((a) => a.toLowerCase());
+        if (!allowed.includes(normalized)) {
+          setStatus("Your wallet is not whitelisted for this presale.");
+          return;
+        }
+      }
+
       const valueBNB = Number(bnbAmount);
       if (!valueBNB || valueBNB <= 0) {
         setStatus("Enter a valid BNB amount.");
@@ -213,6 +270,36 @@ function App() {
       setStatus("Transaction sent. Waiting for confirmation…");
 
       await tx.wait();
+
+      // update local analytics
+      const currentRef =
+        referrer || localStorage.getItem("sld_referrer") || null;
+
+      const newInvestorCount = investorCount + 1;
+      const newTotalContributed = totalContributed + valueBNB;
+
+      const newReferralStats = { ...referralStats };
+      if (currentRef) {
+        const key = currentRef.toLowerCase();
+        newReferralStats[key] = (newReferralStats[key] || 0) + valueBNB;
+      }
+
+      setInvestorCount(newInvestorCount);
+      setTotalContributed(newTotalContributed);
+      setReferralStats(newReferralStats);
+
+      try {
+        localStorage.setItem(
+          "sld_analytics",
+          JSON.stringify({
+            investorCount: newInvestorCount,
+            totalContributed: newTotalContributed,
+            referralStats: newReferralStats,
+          })
+        );
+      } catch (e) {
+        console.error("Error saving analytics:", e);
+      }
 
       setStatus(
         `Success! TX hash: ${tx.hash}. You will receive your ${TOKEN_SYMBOL} after the team processes presale allocations according to the vesting schedule.`
@@ -261,15 +348,64 @@ function App() {
     }
   };
 
+  const myReferralLink =
+    walletAddress && typeof window !== "undefined"
+      ? `${window.location.origin}?ref=${walletAddress}`
+      : "";
+
+  const topReferrers = Object.entries(referralStats)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
   return (
-    <div className="app">
+    <div className={`app ${theme}`}>
       <header className="header">
-        <div className="logo">SLD</div>
+        <div className="logo" />
         <div className="title-group">
-          <h1>Solidarity (SLD) Presale</h1>
-          <p>Empowering Global Mutual Support on BNB Smart Chain</p>
+          <h1>
+            {isFrench ? "Solidarity (SLD) Prévente" : "Solidarity (SLD) Presale"}
+          </h1>
+          <p>
+            {isFrench
+              ? "Renforcer le soutien mutuel mondial sur BNB Smart Chain"
+              : "Empowering Global Mutual Support on BNB Smart Chain"}
+          </p>
         </div>
         <div className="header-right">
+          <div className="header-toggles">
+            <div className="theme-toggle">
+              <button
+                type="button"
+                className={theme === "dark" ? "toggle-btn active" : "toggle-btn"}
+                onClick={() => setTheme("dark")}
+              >
+                🌙
+              </button>
+              <button
+                type="button"
+                className={theme === "light" ? "toggle-btn active" : "toggle-btn"}
+                onClick={() => setTheme("light")}
+              >
+                ☀
+              </button>
+            </div>
+            <div className="lang-toggle">
+              <button
+                type="button"
+                className={lang === "en" ? "toggle-btn active" : "toggle-btn"}
+                onClick={() => setLang("en")}
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                className={lang === "fr" ? "toggle-btn active" : "toggle-btn"}
+                onClick={() => setLang("fr")}
+              >
+                FR
+              </button>
+            </div>
+          </div>
           <nav className="social-links">
             <a href={WEBSITE_URL} target="_blank" rel="noreferrer">
               Website
@@ -284,6 +420,8 @@ function App() {
           <button className="wallet-btn" onClick={connectWallet}>
             {walletAddress
               ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+              : isFrench
+              ? "Connecter le portefeuille"
               : "Connect Wallet"}
           </button>
         </div>
@@ -291,16 +429,18 @@ function App() {
 
       <main className="content">
         <section className="card">
-          <h2>Participate in Presale</h2>
+          <h2>{isFrench ? "Participer à la prévente" : "Participate in Presale"}</h2>
           <p className="rate">
             1 BNB = <strong>{PRESALE_RATE.toLocaleString()} SLD</strong>
           </p>
           <p className="timer">
-            ⏳ Presale time left: <strong>{timeLeft}</strong>
+            ⏳{" "}
+            {isFrench ? "Temps restant :" : "Presale time left:"}{" "}
+            <strong>{timeLeft}</strong>
           </p>
 
           <div className="field-group">
-            <label>Amount in BNB</label>
+            <label>{isFrench ? "Montant en BNB" : "Amount in BNB"}</label>
             <input
               type="number"
               min="0"
@@ -312,7 +452,9 @@ function App() {
           </div>
 
           <div className="field-group">
-            <label>You will receive (approx)</label>
+            <label>
+              {isFrench ? "Vous recevrez (approx.)" : "You will receive (approx)"}
+            </label>
             <div className="output">
               {sldAmount} <span>{TOKEN_SYMBOL}</span>
             </div>
@@ -323,7 +465,13 @@ function App() {
             onClick={handleBuy}
             disabled={loading}
           >
-            {loading ? "Processing…" : "Buy SLD"}
+            {loading
+              ? isFrench
+                ? "Traitement…"
+                : "Processing…"
+              : isFrench
+              ? "Acheter SLD"
+              : "Buy SLD"}
           </button>
 
           <button
@@ -331,42 +479,73 @@ function App() {
             className="secondary-btn"
             onClick={handleAddTokenToWallet}
           >
-            Add SLD to MetaMask
+            {isFrench ? "Ajouter SLD à MetaMask" : "Add SLD to MetaMask"}
           </button>
 
           <p className="note">
-            Tokens are distributed manually after the presale ends, according to
-            the official vesting schedule.
+            {isFrench
+              ? "Les jetons seront distribués manuellement après la fin de la prévente, selon le calendrier de vesting officiel."
+              : "Tokens are distributed manually after the presale ends, according to the official vesting schedule."}
           </p>
 
           <p className="note">
-            Mobile users: open this website inside MetaMask or Trust Wallet DApp
-            browser for the best experience.
+            {isFrench
+              ? "Sur mobile : ouvrez ce site dans le navigateur DApp de MetaMask ou Trust Wallet."
+              : "Mobile users: open this website inside MetaMask or Trust Wallet DApp browser for the best experience."}
           </p>
+          {WHITELIST_ENABLED && (
+            <p className="note">
+              {isFrench
+                ? "La prévente est en mode liste blanche. Seules les adresses approuvées peuvent participer."
+                : "Presale is in whitelist mode. Only approved addresses can participate."}
+            </p>
+          )}
         </section>
 
         <section className="card">
-          <h2>Presale Information</h2>
+          <h2>{isFrench ? "Informations sur la prévente" : "Presale Information"}</h2>
           <ul className="info-list">
-            <li>Chain: BNB Smart Chain (BEP-20)</li>
-            <li>Presale rate: 1 BNB = 23,000,000 SLD</li>
             <li>
-              Contract:{" "}
+              {isFrench
+                ? "Réseau : BNB Smart Chain (BEP-20)"
+                : "Chain: BNB Smart Chain (BEP-20)"}
+            </li>
+            <li>
+              {isFrench
+                ? "Taux de prévente : 1 BNB = 23 000 000 SLD"
+                : "Presale rate: 1 BNB = 23,000,000 SLD"}
+            </li>
+            <li>
+              {isFrench ? "Contrat :" : "Contract:"}{" "}
               <span className="mono">
                 0xb10c8C889a23C4835Ea4F5962666b0B8da891B1A
               </span>
             </li>
-            <li>Presale allocation: 20% of total supply</li>
-            <li>Liquidity locked for 6 months</li>
-            <li>10% unlocked at TGE, remaining vested over 6 months</li>
+            <li>
+              {isFrench
+                ? "Allocation de prévente : 20% de l'offre totale"
+                : "Presale allocation: 20% of total supply"}
+            </li>
+            <li>
+              {isFrench
+                ? "Liquidité verrouillée pour 6 mois"
+                : "Liquidity locked for 6 months"}
+            </li>
+            <li>
+              {isFrench
+                ? "10% débloqués au TGE, reste vesté sur 6 mois"
+                : "10% unlocked at TGE, remaining vested over 6 months"}
+            </li>
           </ul>
 
           <div className="progress-section">
-            <h3>Presale Progress</h3>
+            <h3>{isFrench ? "Progression de la prévente" : "Presale Progress"}</h3>
             <p>
-              Raised:{" "}
+              {isFrench ? "Collecté :" : "Raised:"}{" "}
               <strong>
-                {raisedLoading ? "…" : `${raisedBNB.toFixed(4)} BNB`}
+                {raisedLoading
+                  ? "…"
+                  : `${raisedBNB.toFixed(4)} BNB`}
               </strong>{" "}
               / <strong>{SOFT_CAP_BNB} BNB soft cap</strong> /{" "}
               <strong>{HARD_CAP_BNB} BNB hard cap</strong>
@@ -379,17 +558,23 @@ function App() {
             </div>
             {!BSCSCAN_API_KEY && (
               <p className="note">
-                * To auto-update this value, set BSCSCAN_API_KEY in App.js.
-                Otherwise, you can edit raisedBNB manually.
+                {isFrench
+                  ? "* Pour mettre à jour automatiquement cette valeur, ajoutez BSCSCAN_API_KEY dans App.js."
+                  : "* To auto-update this value, set BSCSCAN_API_KEY in App.js."}
               </p>
             )}
           </div>
 
           <div className="qr-section">
-            <h3>Scan to Open Presale</h3>
+            <h3>
+              {isFrench
+                ? "Scanner pour ouvrir la prévente"
+                : "Scan to Open Presale"}
+            </h3>
             <p className="note">
-              Scan this QR code with your phone camera or wallet app to open
-              this presale page.
+              {isFrench
+                ? "Scannez ce QR code avec votre téléphone ou votre wallet pour ouvrir cette page de prévente."
+                : "Scan this QR code with your phone or wallet app to open this presale page."}
             </p>
             <img
               src="/sld-presale-qr.png"
@@ -400,43 +585,160 @@ function App() {
         </section>
 
         <section className="card full-width">
-          <h2>How to Buy SLD</h2>
+          <h2>{isFrench ? "Comment acheter SLD" : "How to Buy SLD"}</h2>
           <ol className="info-list">
             <li>
-              <strong>Install a wallet:</strong> Use MetaMask (browser) or
-              MetaMask / Trust Wallet app on mobile.
+              <strong>{isFrench ? "Installer un wallet :" : "Install a wallet:"}</strong>{" "}
+              {isFrench
+                ? "Utilisez MetaMask (navigateur) ou MetaMask / Trust Wallet sur mobile."
+                : "Use MetaMask (browser) or MetaMask / Trust Wallet app on mobile."}
             </li>
             <li>
-              <strong>Switch to BNB Smart Chain (BSC):</strong> The website will
-              prompt you to switch. Approve the network change in your wallet.
+              <strong>
+                {isFrench
+                  ? "Passer sur BNB Smart Chain (BSC) :"
+                  : "Switch to BNB Smart Chain (BSC):"}
+              </strong>{" "}
+              {isFrench
+                ? "Le site vous demandera de changer de réseau. Acceptez dans votre wallet."
+                : "The website will prompt you to switch. Approve the network change in your wallet."}
             </li>
             <li>
-              <strong>Fund your wallet with BNB:</strong> Buy BNB on an exchange
-              (Binance, KuCoin, etc.) and withdraw to your BSC wallet address.
+              <strong>
+                {isFrench
+                  ? "Approvisionner votre wallet en BNB :"
+                  : "Fund your wallet with BNB:"}
+              </strong>{" "}
+              {isFrench
+                ? "Achetez du BNB sur un exchange (Binance, KuCoin, etc.) et retirez vers votre adresse BSC."
+                : "Buy BNB on an exchange (Binance, KuCoin, etc.) and withdraw to your BSC wallet address."}
             </li>
             <li>
-              <strong>Connect your wallet:</strong> Click the{" "}
-              <em>Connect Wallet</em> button at the top right of this page.
+              <strong>
+                {isFrench
+                  ? "Connecter votre wallet :"
+                  : "Connect your wallet:"}
+              </strong>{" "}
+              {isFrench
+                ? "Cliquez sur le bouton « Connecter le portefeuille » en haut à droite."
+                : "Click the Connect Wallet button at the top right of this page."}
             </li>
             <li>
-              <strong>Enter BNB amount:</strong> In the presale card, type how
-              much BNB you want to contribute. You’ll see the SLD you will
-              receive.
+              <strong>
+                {isFrench
+                  ? "Entrer le montant en BNB :"
+                  : "Enter BNB amount:"}
+              </strong>{" "}
+              {isFrench
+                ? "Dans la carte de prévente, saisissez le montant de BNB à contribuer. Vous verrez le SLD à recevoir."
+                : "In the presale card, type how much BNB you want to contribute. You’ll see the SLD you will receive."}
             </li>
             <li>
-              <strong>Confirm the transaction:</strong> Click{" "}
-              <em>Buy SLD</em>. Your wallet will open — confirm the transaction.
+              <strong>
+                {isFrench
+                  ? "Confirmer la transaction :"
+                  : "Confirm the transaction:"}
+              </strong>{" "}
+              {isFrench
+                ? "Cliquez sur « Acheter SLD ». Votre wallet s’ouvrira — confirmez la transaction."
+                : "Click Buy SLD. Your wallet will open — confirm the transaction."}
             </li>
             <li>
-              <strong>Receive SLD:</strong> After the presale ends, SLD will be
-              distributed to your wallet according to the vesting schedule.
+              <strong>
+                {isFrench
+                  ? "Recevoir SLD :"
+                  : "Receive SLD:"}
+              </strong>{" "}
+              {isFrench
+                ? "Après la fin de la prévente, SLD sera distribué selon le calendrier de vesting."
+                : "After the presale ends, SLD will be distributed to your wallet according to the vesting schedule."}
             </li>
           </ol>
+        </section>
+
+        <section className="card full-width">
+          <h2>{isFrench ? "Références & Statistiques" : "Referrals & Analytics"}</h2>
+          <div className="analytics-grid">
+            <div>
+              <h3>{isFrench ? "Statistiques locales" : "Local Analytics"}</h3>
+              <p>
+                {isFrench ? "Investisseurs (local) :" : "Investors (local):"}{" "}
+                <strong>{investorCount}</strong>
+              </p>
+              <p>
+                {isFrench ? "Total contribué (local) :" : "Total contributed (local):"}{" "}
+                <strong>{totalContributed.toFixed(4)} BNB</strong>
+              </p>
+              <p>
+                {isFrench ? "Contribution moyenne :" : "Average contribution:"}{" "}
+                <strong>{averageContribution.toFixed(4)} BNB</strong>
+              </p>
+              <p className="note">
+                {isFrench
+                  ? "Ces statistiques sont locales à votre navigateur. Pour des chiffres officiels, utilisez un backend ou un tableau de bord on-chain."
+                  : "These stats are local to your browser. For official numbers, use a backend or on-chain dashboard."}
+              </p>
+            </div>
+
+            <div>
+              <h3>{isFrench ? "Votre lien de parrainage" : "Your Referral Link"}</h3>
+              {walletAddress ? (
+                <>
+                  <p className="note">
+                    {isFrench
+                      ? "Partagez ce lien. Les contributions seront attribuées à votre adresse en local."
+                      : "Share this link. Contributions will be attributed to your address locally."}
+                  </p>
+                  <div className="referral-box">
+                    <code>{myReferralLink}</code>
+                  </div>
+                </>
+              ) : (
+                <p className="note">
+                  {isFrench
+                    ? "Connectez votre wallet pour voir votre lien de parrainage."
+                    : "Connect your wallet to see your referral link."}
+                </p>
+              )}
+              {referrer && (
+                <p>
+                  {isFrench ? "Votre parrain :" : "Your referrer:"}{" "}
+                  <span className="mono">{referrer}</span>
+                </p>
+              )}
+            </div>
+
+            <div>
+              <h3>{isFrench ? "Top parrains (local)" : "Top Referrers (local)"}</h3>
+              {topReferrers.length === 0 ? (
+                <p className="note">
+                  {isFrench
+                    ? "Aucun parrain enregistré localement pour le moment."
+                    : "No referrers recorded locally yet."}
+                </p>
+              ) : (
+                <ol className="info-list">
+                  {topReferrers.map(([addr, amount]) => (
+                    <li key={addr}>
+                      <span className="mono">
+                        {addr.slice(0, 6)}...{addr.slice(-4)}
+                      </span>{" "}
+                      — {amount.toFixed(4)} BNB
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
         </section>
       </main>
 
       <footer className="footer">
-        <p>Always double-check the contract address and website URL.</p>
+        <p>
+          {isFrench
+            ? "Vérifiez toujours l’adresse du contrat et l’URL du site."
+            : "Always double-check the contract address and website URL."}
+        </p>
       </footer>
 
       {status && <div className="status-bar">{status}</div>}
